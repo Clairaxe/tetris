@@ -1,6 +1,7 @@
-from expyriment import design, control, stimuli
+from expyriment import design, control, stimuli, misc
 from expyriment.misc.constants import C_WHITE, C_BLACK, C_BLUE,C_RED,C_GREEN,C_EXPYRIMENT_ORANGE, K_1, K_2, K_SPACE
-
+import os, sys
+import random
 
 '''
 
@@ -23,17 +24,38 @@ window(answer_taken=False,full=None):
 
 class Grid(grid_combinations):
     grid = rand.choice(grid_combinations)
-    if conditions met:
-        continue
-    else:
-        grid = rand.choice(grid_combinations)
+    while 1:
+        if conditions met:
+            break
+        else:
+            grid = rand.choice(grid_combinations)
     match = grid.match
 
 experiment(grid_combinations):
     grid = Grid(grid_combinations)
     for i in range(84)
         cycle(grid)
+        
 '''
+
+def load(stims):
+    for stim in stims:
+        stim.preload()
+    
+
+def timed_draw(stims):
+    clock = misc.Clock()
+    t0 = clock.time
+    for stim in stims:
+        stim.present()
+    t1 = clock.time
+    return t1-t0
+    # return the time it took to draw
+
+def present_for(stims, t=1000):
+    clock = misc.Clock()
+    time = timed_draw(stims)
+    clock.wait(t-time)
 
 
 
@@ -42,37 +64,80 @@ exp = design.Experiment(name="Stroop", background_colour=C_WHITE, foreground_col
 exp.add_data_variable_names(["trial block","trial number", "trial type", "word","text color", "RTs(ms)", "accuracy"])
 control.set_develop_mode()
 control.initialize(exp)
-color_names= ["red","blue","green","orange"]
-color_codes = [C_RED,C_BLUE,C_GREEN,C_EXPYRIMENT_ORANGE]
-code_color_match = {
-    "RED":C_RED,
-    "BLUE":C_BLUE,
-    "ORANGE":C_EXPYRIMENT_ORANGE,
-    "GREEN":C_GREEN
-}
-def get_color_name(color):
-    for name, code in code_color_match.items():
-        if color == code:
-            return name
+
+IMG_DIR = "images"
 
 """ Stimuli """
-def trial_combo():
-    color_id_rand = design.randomize.rand_element(range(len(color_names)))
-    color_name = color_names[color_id_rand]
-    match=design.randomize.coin_flip()
-    if match:
-        color = color_codes[color_id_rand]
-        trial_type = "match"
-    else:
-        colors = [code for i,code in enumerate(color_codes) if i != color_id_rand]
-        color = design.randomize.rand_element(colors)
-        trial_type = "mismatch"
-    
-    text = stimuli.TextLine(color_name,text_colour=color)
-    text.preload()
+def load_photo_stim(path):
+    stim = stimuli.Picture(path, (0.0))
+    return stim
 
-    return text, trial_type
+def split_stims(path):
+    img_dir = os.path.join(os.path.dirname(sys.argv[0]), path)
+    if not os.path.exists(img_dir):
+        raise FileNotFoundError(f"Image directory not found: {img_dir}")
+
+    all_files = [f for f in os.listdir(img_dir) if f.endswith(".png")]
+    if not all_files:
+        raise FileNotFoundError("No .png files found in ./images/")
     
+    square = [os.path.join(img_dir,f) for f in all_files if f == "square.png"]
+    mismatch = [os.path.join(img_dir,f) for f in all_files if f.startswith("mismatch_")]
+    match = [os.path.join(img_dir,f) for f in all_files if f.startswith("match_")]
+    bottom = [os.path.join(img_dir,f) for f in all_files if f.startswith("bottom_")]
+
+    mismatch.sort()
+    match.sort()
+    bottom.sort()
+    square_stims   = [load_photo_stim(p) for p in square]
+    match_stims    = [load_photo_stim(p) for p in match]
+    mismatch_stims = [load_photo_stim(p) for p in mismatch]
+    bottom_stims   = [load_photo_stim(p) for p in bottom]
+    
+    load(square_stims)
+    load(match_stims)
+    load(mismatch_stims)
+    load(bottom_stims)
+
+    return square_stims, match_stims, mismatch_stims, bottom_stims
+
+
+def make_stim_list(square, match, mismatch, bottom):
+    trials = (
+    [{"stim": random.choice(square),   "kind": "target"}      for _ in range(24)] +
+    [{"stim": random.choice(match),    "kind": "potential"}   for _ in range(24)] +
+    [{"stim": random.choice(mismatch), "kind": "non_potential"}for _ in range(24)] +
+    [{"stim": random.choice(bottom),   "kind": "non_potential"}      for _ in range(12)]#make sure the bottoms are considered non-potential
+    )
+
+    random.shuffle(trials)
+
+    def nex_kind(i):
+        if i == len(trials) - 1:
+            return None
+        k = trials[i+1]["kind"]
+        return k
+    
+    while True:
+        potentials = sum(1 for i,t in enumerate(trials[:-1]) if t["kind"] == "target" and nex_kind(i)=="potential")
+        non_potentials = sum(1 for i,t in enumerate(trials[:-1]) if t["kind"] == "target" and nex_kind(i)=="non_potential")
+        if potentials==non_potentials:
+            break
+
+        random.shuffle(trials)
+
+    return trials
+
+
+def window(answer_taken, target):
+    if answer_taken == True and target == True:
+        return the window green
+    elif answer_taken == True and target == False:
+        return the window red
+    else:
+        return the window black
+
+
 
 keys_chars = {
     49: 'K_1',
