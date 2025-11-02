@@ -130,7 +130,7 @@ def make_stim_list(square, match, mismatch, bottom):
 
 
 def window(answer_taken, target):
-    vertices = misc.geometry.vertices_frame((ww/2,wl/2), frame_thickness=30)
+    vertices = misc.geometry.vertices_frame((ww,wl), frame_thickness=10)
     if answer_taken and target == True:
         frame = stimuli.Shape(vertex_list=vertices,colour=(0,255,0))
         load([frame])
@@ -140,7 +140,7 @@ def window(answer_taken, target):
         load([frame])
         return frame
     else:
-        frame = stimuli.Shape(vertex_list=vertices,colour=(255,255,255))
+        frame = stimuli.Shape(vertex_list=vertices,colour=(0,0,0))
         load([frame])
         return frame
 
@@ -157,22 +157,30 @@ def run_trial():
     square, match, mismatch, bottom = split_stims(IMG_DIR)
     trial_list = make_stim_list(square=square,match=match,mismatch=mismatch,bottom=bottom)
     answer = False
-
+    clock = misc.Clock()
     for stim in trial_list:
+        answer = False
         ##frame with the stim with constant check 600ms
-        for _ in range(120):
-            stim.present(clear=True,present=False)
-            target = stim["kind"] == "potential"
-            frame = window(answer, target=target)
-            frame.present(clear=False, present=True)
-            key, _ =  exp.keyboard.wait(keys = K_SPACE, duration = 5)
-            answer = key == K_SPACE
+        #for _ in range(60):
+        t0 = clock.time
+        stim["stim"].present(clear=True,update=False)
+        target = stim["kind"] == "target"
+        frame = window(answer, target=target)
+        frame.present(clear=False, update=True)
+        t1 = clock.time
+        t = max(0,t1-t0)
+        key, _ =  exp.keyboard.wait(keys = K_SPACE, duration = 600-t)
+        answer = (key == K_SPACE) ^ answer 
+
         ##blank frame with constant check 1200ms
-        for _ in range(240):
-            frame = window(answer, target=target)
-            frame.present(clear=True, present=True)
-            key, _ =  exp.keyboard.wait(keys = K_SPACE, duration = 5)
-            answer = key == K_SPACE
+        #for _ in range(120):
+        t0 = clock.time
+        frame = window(answer, target=target)
+        frame.present(clear=True, update=True) 
+        t1 = clock.time
+        t = max(0,t1-t0)
+        key, _ =  exp.keyboard.wait(keys = K_SPACE, duration = 1200-t)
+        answer = (key == K_SPACE) ^ answer 
 
 
 

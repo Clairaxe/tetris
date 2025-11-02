@@ -1,0 +1,11 @@
+#Expyriment 1.0.0 (Python 3.12.12), .xpd-file, coding: UTF-8
+#date: Sun Nov 02 2025 22:17:16
+#--EXPERIMENT INFO
+#e mainfile: tetris.py
+#e sha1: 61e318
+#e modules: 
+#e Experiment: Stroop
+#e no between subject factors
+#--SUBJECT INFO
+#s id: 1
+subject_id,trial block,trial number,trial type,word,text color,RTs(ms),accuracy
