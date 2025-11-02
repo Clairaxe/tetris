@@ -38,6 +38,16 @@ experiment(grid_combinations):
         
 '''
 
+""" Global settings """
+exp = design.Experiment(name="Stroop", background_colour=C_WHITE, foreground_colour=C_BLACK)
+exp.add_data_variable_names(["trial block","trial number", "trial type", "word","text color", "RTs(ms)", "accuracy"])
+control.set_develop_mode()
+control.initialize(exp)
+
+ww, wl = exp.screen.size
+
+IMG_DIR = "images"
+
 def load(stims):
     for stim in stims:
         stim.preload()
@@ -56,16 +66,6 @@ def present_for(stims, t=1000):
     clock = misc.Clock()
     time = timed_draw(stims)
     clock.wait(t-time)
-
-
-
-""" Global settings """
-exp = design.Experiment(name="Stroop", background_colour=C_WHITE, foreground_colour=C_BLACK)
-exp.add_data_variable_names(["trial block","trial number", "trial type", "word","text color", "RTs(ms)", "accuracy"])
-control.set_develop_mode()
-control.initialize(exp)
-
-IMG_DIR = "images"
 
 """ Stimuli """
 def load_photo_stim(path):
@@ -130,12 +130,19 @@ def make_stim_list(square, match, mismatch, bottom):
 
 
 def window(answer_taken, target):
-    if answer_taken == True and target == True:
-        return the window green
-    elif answer_taken == True and target == False:
-        return the window red
+    vertices = misc.geometry.vertices_frame((ww/2,wl/2), frame_thickness=30)
+    if answer_taken and target == True:
+        frame = stimuli.Shape(vertex_list=vertices,colour=(0,255,0))
+        load([frame])
+        return frame
+    elif answer_taken and target == False:
+        frame = stimuli.Shape(vertex_list=vertices,colour=(255,0,0))
+        load([frame])
+        return frame
     else:
-        return the window black
+        frame = stimuli.Shape(vertex_list=vertices,colour=(255,255,255))
+        load([frame])
+        return frame
 
 
 
@@ -147,36 +154,27 @@ keys_chars = {
 
 """ Experiment """
 def run_trial():
-    fixation = stimuli.FixCross(size=(150, 150), line_width=10, position=[0 , 0])
-    fixation.preload()
-    for block in range(2):
-        text = stimuli.TextScreen(f"Stroop Effect Block:{block+1}", "After 0.5 seconds of the fixcross you will see a word, if the color of the word matches the text color press 1, if not press 2. \n---Press SPACE to continue")
-        text.present(True,True)
-        exp.keyboard.wait() 
-        for trial in range(16):
-            fixation.present(True, True)
-            exp.clock.wait(500)
-            color_text, trial_type = trial_combo()
-            color_text.present(True,True)
-            t0=exp.clock.time
-            pressed, _ = exp.keyboard.wait(keys = [K_1, K_2, K_SPACE])
-            t1=exp.clock.time
-            if pressed == K_1 and trial_type == "match" or pressed == K_2 and trial_type == "mismatch":
-                exp.data.add([block+1,
-                              trial+1,
-                              trial_type,
-                              color_text.text,
-                              get_color_name(color_text.text_colour),
-                              t1-t0,
-                              1])
-            else:
-                exp.data.add([block+1,
-                              trial+1,
-                              trial_type,
-                              color_text.text,
-                              get_color_name(color_text.text_colour),
-                              t1-t0,
-                              0])
+    square, match, mismatch, bottom = split_stims(IMG_DIR)
+    trial_list = make_stim_list(square=square,match=match,mismatch=mismatch,bottom=bottom)
+    answer = False
+
+    for stim in trial_list:
+        ##frame with the stim with constant check 600ms
+        for _ in range(120):
+            stim.present(clear=True,present=False)
+            target = stim["kind"] == "potential"
+            frame = window(answer, target=target)
+            frame.present(clear=False, present=True)
+            key, _ =  exp.keyboard.wait(keys = K_SPACE, duration = 5)
+            answer = key == K_SPACE
+        ##blank frame with constant check 1200ms
+        for _ in range(240):
+            frame = window(answer, target=target)
+            frame.present(clear=True, present=True)
+            key, _ =  exp.keyboard.wait(keys = K_SPACE, duration = 5)
+            answer = key == K_SPACE
+
+
 
 control.start(subject_id=1)
 
