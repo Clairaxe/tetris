@@ -1,135 +1,161 @@
 from expyriment import design, control, stimuli, misc
 from expyriment.misc.constants import C_WHITE, C_BLACK, K_SPACE
 import os, sys, random
+from collections import Counter, defaultdict
 
-EXP_NAME = "Tetris"
+# Config
+EXPERIMENT_NAME = "Full-5x5 Task"
 IMG_DIR = "images"
 SUBJECT_ID = 1
 
-exp = design.Experiment(name=EXP_NAME, background_colour=C_WHITE, foreground_colour=C_BLACK)
-exp.add_data_variable_names(["subject_id", "trial_num", "stim_name", "kind", "RT_ms", "correct"])
-control.set_develop_mode()      # comment out for real timing
-control.initialize(exp)
+# Durations (ms)
+PHASE_STIM_MS = 600
+PHASE_BLANK_MS = 1200
+BORDER_FLASH_MS = 200
 
+# experiment init
+exp = design.Experiment(
+    name=EXPERIMENT_NAME,
+    background_colour=C_WHITE,
+    foreground_colour=C_BLACK
+)
+exp.add_data_variable_names(
+    ["block", "trial_number", "kind", "image_name", "rt_ms", "pressed", "correct"]
+)
+control.set_develop_mode()
+control.initialize(exp)
 ww, wl = exp.screen.size
 
-# handles stimulus loadings etc. 
+# helpers
+def load(stims):
+    for s in stims:
+        s.preload()
 
 def load_photo_stim(path):
+    # Centered by default
     return stimuli.Picture(path)
 
-def split_stims(path):
-    img_dir = os.path.join(os.path.dirname(sys.argv[0]), path)
-    all_files = [f for f in os.listdir(img_dir) if f.endswith(".png")]
-    if not all_files:
+def split_stims(path_dir):
+    img_dir = os.path.join(os.path.dirname(sys.argv[0]), path_dir)
+    if not os.path.exists(img_dir):
+        raise FileNotFoundError(f"Image directory not found: {img_dir}")
+
+    all_png = [f for f in os.listdir(img_dir) if f.endswith(".png")]
+    if not all_png:
         raise FileNotFoundError("No .png files found in ./images/")
 
-    square   = [os.path.join(img_dir, f) for f in all_files if f == "square.png"]
-    match    = [os.path.join(img_dir, f) for f in all_files if f.startswith("match_")]
-    mismatch = [os.path.join(img_dir, f) for f in all_files if f.startswith("mismatch_")]
-    bottom   = [os.path.join(img_dir, f) for f in all_files if f.startswith("bottom_")]
+    square_files   = [f for f in all_png if f == "square.png"]
+    match_files    = sorted([f for f in all_png if f.startswith("match_")])
+    mismatch_files = sorted([f for f in all_png if f.startswith("mismatch_")])
+    bottom_files   = sorted([f for f in all_png if f.startswith("bottom_")])
 
-    square_stims   = [load_photo_stim(p) for p in square]
-    match_stims    = [load_photo_stim(p) for p in match]
-    mismatch_stims = [load_photo_stim(p) for p in mismatch]
-    bottom_stims   = [load_photo_stim(p) for p in bottom]
+    if len(square_files) != 1:
+        raise RuntimeError("Expect exactly one 'square.png'.")
 
-    for cat in [square_stims, match_stims, mismatch_stims, bottom_stims]:
-        for s in cat:
-            s.preload()
+    if len(match_files) != 6 or len(mismatch_files) != 6 or len(bottom_files) != 6:
+        raise RuntimeError("Expect match_1..6, mismatch_1..6, bottom_1..6.")
 
-    print(f"Loaded: square={len(square_stims)}, match={len(match_stims)}, mismatch={len(mismatch_stims)}, bottom={len(bottom_stims)}")
-    return square_stims, match_stims, mismatch_stims, bottom_stims
+    # Build stimuli dicts with image name for logging
+    square_path = os.path.join(img_dir, square_files[0])
+    square_stim = load_photo_stim(square_path)
 
-# handles the color border 
-
-def make_frames():
-    """Prebuild and preload the 3 frame variants"""
-    verts = misc.geometry.vertices_frame((ww, wl), frame_thickness=10)
-    fr_neutral = stimuli.Shape(vertex_list=verts, colour=(0, 0, 0))     # black
-    fr_correct = stimuli.Shape(vertex_list=verts, colour=(0, 255, 0))   # green
-    fr_error   = stimuli.Shape(vertex_list=verts, colour=(255, 0, 0))   # red
-    for fr in (fr_neutral, fr_correct, fr_error):
-        fr.preload()
-    return {"neutral": fr_neutral, "correct": fr_correct, "error": fr_error}
-
-FRAMES = make_frames()
-
-def present_with_frame(content_stim=None, frame_key="neutral", clear=True):
-    if clear:
-        exp.screen.clear()
-    if content_stim is not None:
-        content_stim.present(clear=False, update=False)
-    FRAMES[frame_key].present(clear=False, update=True)
-
-# help
-
-def reps(stim_list, kind, n):
-        """Replicate each stimulus in stim_list exactly n times as separate items."""
+    def mk_stims(files):
         out = []
-        for s in stim_list:
-            for _ in range(n):
-                out.append({"stim": s, "kind": kind, "image": getattr(s, "filename", "")})
+        for f in files:
+            p = os.path.join(img_dir, f)
+            out.append({"stim": load_photo_stim(p), "name": f})
         return out
-    
-# trial creation
 
-def make_stim_list(square, match, mismatch, bottom):
+    match_stims = mk_stims(match_files)
+    mismatch_stims = mk_stims(mismatch_files)
+    bottom_stims = mk_stims(bottom_files)
+
+    # Preload
+    load([square_stim] + [d["stim"] for d in match_stims + mismatch_stims + bottom_stims])
+
+    return square_stim, match_stims, mismatch_stims, bottom_stims
+
+def build_balanced_trials(square_stim, match_stims, mismatch_stims, bottom_stims):
     """
-    Exact paper spec with minimal logic:
-      - Images present: bottom_1..6, match_1..6, mismatch_1..6, square
-      - Counts per image:
-          match_i:     4 each  (24 total potential)
-          mismatch_i:  4 each  (24 total mismatch)
-          bottom_i:    2 each  (12 total bottom)
-          square:      24 total targets
-      - Constraints:
-          * No adjacent targets
-          * Exactly 12 targets preceded by 'potential' and 12 by 'mismatch'
-          * Targets are never preceded by 'bottom'
+      Images present:
+        bottom_1..6, match_1..6, mismatch_1..6, square
+      Counts per image:
+        match_i:     4 each  (24 total potential)
+        mismatch_i:  4 each  (24 total mismatch)
+        bottom_i:    2 each  (12 total bottom)
+        square:      24 total targets
+      Constraints:
+        * No adjacent targets
+        * Exactly 12 targets preceded by 'potential' (match) and 12 by 'mismatch'
+        * Targets are never preceded by 'bottom'
     """
 
-    # --- exact-repeat pools (per-image counts are fixed here) ---
-    pot_all = reps(match,    "potential", 4)   # 6 * 4 = 24
-    mis_all = reps(mismatch, "mismatch",  4)   # 6 * 4 = 24
-    bot_all = reps(bottom,   "bottom",    2)   # 6 * 2 = 12
-    tgt_all = [{"stim": square[0], "kind": "target", "image": getattr(square[0], "filename", "")} for _ in range(24)]
+    # Expand non-target pools with exact counts
+    def expand(items, count_each, kind):
+        bag = []
+        for d in items:
+            for _ in range(count_each):
+                bag.append({"kind": kind, "stim": d["stim"], "name": d["name"]})
+        return bag
 
-    # Shuffle within pools so each image’s instances are mixed
-    random.shuffle(pot_all)
-    random.shuffle(mis_all)
-    random.shuffle(bot_all)
+    non_targets = []
+    non_targets += expand(match_stims,    4, "potential")    # 24
+    non_targets += expand(mismatch_stims, 4, "mismatch")     # 24
+    non_targets += expand(bottom_stims,   2, "bottom")       # 12
+    assert len(non_targets) == 60
 
-    # --- preceders for the 24 targets: 12 potential + 12 mismatch (balanced) ---
-    prec_list = pot_all[:12] + mis_all[:12]
-    random.shuffle(prec_list)
+    # Shuffle non-targets
+    random.shuffle(non_targets)
 
-    # Remaining extras to distribute in gaps
-    pot_left = pot_all[12:]   # 12 left
-    mis_left = mis_all[12:]   # 12 left
-    extras   = pot_left + mis_left + bot_all  # 12 + 12 + 12 = 36
-    random.shuffle(extras)
+    # Choose exactly 12 potentials and 12 mismatches that will be followed by a target
+    potential_idxs = [i for i, t in enumerate(non_targets) if t["kind"] == "potential"]
+    mismatch_idxs  = [i for i, t in enumerate(non_targets) if t["kind"] == "mismatch"]
 
-    # --- build pairs [preceder, target] so targets can’t be adjacent ---
-    pairs = []
-    for prec, tgt in zip(prec_list, tgt_all):
-        pairs.append([prec, tgt])
+    chosen_p = set(random.sample(potential_idxs, 12))
+    chosen_m = set(random.sample(mismatch_idxs, 12))
 
-    # --- distribute extras across 25 gaps: before, between, after pairs ---
-    gaps = [[] for _ in range(25)]
-    for ex in extras:
-        gaps[random.randrange(25)].append(ex)
+    # Mark flags on a copy
+    for i, t in enumerate(non_targets):
+        t["followed_by_target"] = (i in chosen_p) or (i in chosen_m)
 
-    # --- stitch final sequence: gap0 + pair0 + gap1 + pair1 + ... + gap24 ---
+    # Assemble final trial list: for each non-target, append it; if flagged, append a target after it
     trials = []
-    for i in range(24):
-        trials.extend(gaps[i])
-        trials.extend(pairs[i])
-    trials.extend(gaps[24])
+    for t in non_targets:
+        trials.append({
+            "kind": t["kind"],
+            "stim": t["stim"],
+            "name": t["name"],
+            "is_target": False
+        })
+        if t["followed_by_target"]:
+            trials.append({
+                "kind": "target",
+                "stim": square_stim,
+                "name": "square.png",
+                "is_target": True
+            })
 
     return trials
 
-# instructions
+# frames
+def make_frame(colour_rgb):
+    vertices = misc.geometry.vertices_frame((ww, wl), frame_thickness=10)
+    fr = stimuli.Shape(vertex_list=vertices, colour=colour_rgb)
+    fr.preload()
+    return fr
+
+FRAMES = {
+    "neutral": make_frame((0, 0, 0)),
+    "correct": make_frame((0, 255, 0)),
+    "incorrect": make_frame((255, 0, 0)),
+}
+
+def present_with_frame(content_stim=None, frame_key="neutral", clear=True, update=True):
+    if content_stim is not None:
+        content_stim.present(clear=clear, update=False)
+        FRAMES[frame_key].present(clear=False, update=update)
+    else:
+        FRAMES[frame_key].present(clear=clear, update=update)
 
 def show_instructions():
     instructions = stimuli.TextScreen(
@@ -146,83 +172,86 @@ def show_instructions():
     present_with_frame(content_stim=None, frame_key="neutral", clear=True)
     misc.Clock().wait(300)
 
-# trial
+# trials
+def run_trial_list(trials, block=1):
+    clock = misc.Clock()
+    trial_nr = 0
 
-def flash(frame_key, over_stim=None, dur_ms=200):
-    """Flash the border for 'dur_ms' without re-clearing or re-drawing content."""
-    FRAMES[frame_key].present(clear=False, update=True)
-    misc.Clock().wait(dur_ms)
-    FRAMES["neutral"].present(clear=False, update=True)
+    for tr in trials:
+        trial_nr += 1
+        is_target = tr["is_target"]
+        stim = tr["stim"]
+        img_name = tr["name"]
 
-def run_trial_list(trials):
-    STIM_MS   = 600
-    BLANK_MS  = 1200
-    FLASH_MS  = 200
-    SAFETY_MS = 50   # stop taking input a hair before each transition
+        # Phase 1: stimulus + frame, monitor SPACE for PHASE_STIM_MS
+        rt = None
+        pressed = False
+        correct = None
 
-    # settle
-    exp.keyboard.clear()
-    present_with_frame(None, "neutral", clear=True)
-    misc.Clock().wait(200)
-
-    for i, tr in enumerate(trials, start=1):
-        stim      = tr["stim"]
-        is_target = (tr["kind"] == "target")
-        answered  = False
-        rt        = None
-
-        # ---- STIMULUS (exactly 600 ms; image stays up the whole time) ----
-        exp.keyboard.clear()
-        t0 = misc.Clock()
-        present_with_frame(stim, "neutral", clear=True)
-
-        # accept responses until a small buffer before the flip
-        wait_ms = max(0, STIM_MS - SAFETY_MS)
-        key, rt1 = exp.keyboard.wait([K_SPACE], duration=wait_ms)
+        t0 = clock.time
+        present_with_frame(stim, "neutral", clear=True, update=True)
+        # Wait for response within the remaining time after draw
+        t1 = clock.time
+        remain = max(0, PHASE_STIM_MS - (t1 - t0))
+        key, rt1 = exp.keyboard.wait([K_SPACE], duration=remain)
 
         if key == K_SPACE:
-            answered = True
-            rt = rt1
-            # flash 200 ms max, but never exceed the epoch
-            left = max(0, STIM_MS - t0.time)
-            flash("correct" if is_target else "error", over_stim=stim, dur_ms=min(FLASH_MS, left))
+            pressed = True
+            correct = bool(is_target)
+            rt = rt1  # Expyriment returns RT in ms since present()
+            # Flash feedback for 200 ms
+            present_with_frame(stim, "correct" if correct else "incorrect", clear=True, update=True)
+            misc.Clock().wait(BORDER_FLASH_MS)
+            # Return to neutral for leftover of the phase (if any)
+            elapsed = (clock.time - t0)
+            leftover = max(0, PHASE_STIM_MS - elapsed)
+            if leftover > 0:
+                present_with_frame(stim, "neutral", clear=True, update=True)
+                misc.Clock().wait(leftover)
 
-        # finish to 600 ms exactly (no more input)
-        rem = max(0, STIM_MS - t0.time)
-        if rem > 0:
-            misc.Clock().wait(rem)
+        else:
+            pressed = False
+            correct = (not is_target)  # no press is correct if not a target
 
-        # ---- BLANK (exactly 1200 ms) ----
-        exp.keyboard.clear()
-        t1 = misc.Clock()
-        present_with_frame(None, "neutral", clear=True)
+        # Log phase 1 result
+        exp.data.add(
+            [block, trial_nr, ("target" if is_target else tr["kind"]), img_name, rt if rt is not None else -1,
+             int(pressed), int(correct)]
+        )
 
-        if not answered:
-            wait_ms = max(0, BLANK_MS - SAFETY_MS)
-            key2, rt2 = exp.keyboard.wait([K_SPACE], duration=wait_ms)
-            if key2 == K_SPACE:
-                answered = True
-                rt = STIM_MS + rt2
-                left = max(0, BLANK_MS - t1.time)
-                flash("correct" if is_target else "error", over_stim=None, dur_ms=min(FLASH_MS, left))
+        # Phase 2: blank frame, still monitor for PHASE_BLANK_MS
+        # Reset for phase-2 press
+        t0 = clock.time
+        present_with_frame(None, "neutral", clear=True, update=True)
+        t1 = clock.time
+        remain = max(0, PHASE_BLANK_MS - (t1 - t0))
+        key, rt2 = exp.keyboard.wait([K_SPACE], duration=remain)
 
-        # finish to 1200 ms exactly (no more input)
-        rem = max(0, BLANK_MS - t1.time)
-        if rem > 0:
-            misc.Clock().wait(rem)
+        if key == K_SPACE:
+            # Late press: evaluate against same target label
+            pressed2 = True
+            correct2 = bool(is_target)
+            # Flash only 200 ms
+            present_with_frame(None, "correct" if correct2 else "incorrect", clear=True, update=True)
+            misc.Clock().wait(BORDER_FLASH_MS)
+            # Then neutral for remainder
+            elapsed = (clock.time - t0)
+            leftover = max(0, PHASE_BLANK_MS - elapsed)
+            if leftover > 0:
+                present_with_frame(None, "neutral", clear=True, update=True)
+                misc.Clock().wait(leftover)
 
-        # ---- SAVE ----
-        correct = (answered and is_target) or (not answered and not is_target)
-        exp.data.add([
-            SUBJECT_ID, i, getattr(stim, "filename", "unknown"),
-            tr["kind"], (rt if answered else ""), correct
-        ])
-
-# run experiment
+            exp.data.add([block, trial_nr, ("target" if is_target else tr["kind"]), img_name,
+                          rt2 if rt2 is not None else -1, int(pressed2), int(correct2)])
+        else:
+            pressed2 = False
+            correct2 = (not is_target)
+            exp.data.add([block, trial_nr, ("target" if is_target else tr["kind"]), img_name,
+                          -1, int(pressed2), int(correct2)])
 
 def run_experiment():
     square, match, mismatch, bottom = split_stims(IMG_DIR)
-    trials = make_stim_list(square, match, mismatch, bottom)
+    trials = build_balanced_trials(square, match, mismatch, bottom)
 
     control.start(subject_id=SUBJECT_ID)
 
