@@ -13,7 +13,7 @@ control.initialize(exp)
 
 ww, wl = exp.screen.size
 
-# handes stimulus loadings etc. 
+# handles stimulus loadings etc. 
 
 def load_photo_stim(path):
     return stimuli.Picture(path)
@@ -62,90 +62,70 @@ def present_with_frame(content_stim=None, frame_key="neutral", clear=True):
         content_stim.present(clear=False, update=False)
     FRAMES[frame_key].present(clear=False, update=True)
 
+# help
+
+def reps(stim_list, kind, n):
+        """Replicate each stimulus in stim_list exactly n times as separate items."""
+        out = []
+        for s in stim_list:
+            for _ in range(n):
+                out.append({"stim": s, "kind": kind, "image": getattr(s, "filename", "")})
+        return out
+    
 # trial creation
 
 def make_stim_list(square, match, mismatch, bottom):
     """
-    Construct trials with hard constraints:
-      - Counts: 24 target, 24 potential, 24 mismatch, 12 bottom (total 84)
-      - No adjacent targets
-      - Every target is preceded by potential or mismatch (never by bottom)
-      - Exactly 12 targets preceded by potential and 12 by mismatch
-
-    Strategy (robust, no random reshuffle loops):
-      - Build 24 [preceder, target] pairs (12 'potential' preceders + 12 'mismatch' preceders)
-      - Build remaining distractors: 12 'potential' + 12 'mismatch' + 12 'bottom'
-      - Distribute the 36 extras across 25 gaps around the 24 pairs
-      - Stitch gaps and pairs -> final list
+    Exact paper spec with minimal logic:
+      - Images present: bottom_1..6, match_1..6, mismatch_1..6, square
+      - Counts per image:
+          match_i:     4 each  (24 total potential)
+          mismatch_i:  4 each  (24 total mismatch)
+          bottom_i:    2 each  (12 total bottom)
+          square:      24 total targets
+      - Constraints:
+          * No adjacent targets
+          * Exactly 12 targets preceded by 'potential' and 12 by 'mismatch'
+          * Targets are never preceded by 'bottom'
     """
-    # Basic sanity on inputs
-    if not square:
-        raise RuntimeError("No 'square' stimulus found.")
-    if len(match) == 0 or len(mismatch) == 0 or len(bottom) == 0:
-        raise RuntimeError("Need non-empty match/mismatch/bottom pools.")
 
-    # --- Build the 24 preceders: 12 potential + 12 mismatch ---
-    # We sample with replacement from provided pools to avoid exhausting them.
-    preceders = (
-        [{"stim": random.choice(match),    "kind": "potential"} for _ in range(12)] +
-        [{"stim": random.choice(mismatch), "kind": "mismatch"}  for _ in range(12)]
-    )
-    random.shuffle(preceders)
+    # --- exact-repeat pools (per-image counts are fixed here) ---
+    pot_all = reps(match,    "potential", 4)   # 6 * 4 = 24
+    mis_all = reps(mismatch, "mismatch",  4)   # 6 * 4 = 24
+    bot_all = reps(bottom,   "bottom",    2)   # 6 * 2 = 12
+    tgt_all = [{"stim": square[0], "kind": "target", "image": getattr(square[0], "filename", "")} for _ in range(24)]
 
-    # --- Build the 24 targets (use square[0] or sample if multiple provided) ---
-    target_stim = random.choice(square)
-    targets = [{"stim": target_stim, "kind": "target"} for _ in range(24)]
+    # Shuffle within pools so each image’s instances are mixed
+    random.shuffle(pot_all)
+    random.shuffle(mis_all)
+    random.shuffle(bot_all)
 
-    # --- Pair them: [preceder, target] ---
-    pairs = []
-    for prec, tgt in zip(preceders, targets):
-        pairs.append([prec, tgt])
+    # --- preceders for the 24 targets: 12 potential + 12 mismatch (balanced) ---
+    prec_list = pot_all[:12] + mis_all[:12]
+    random.shuffle(prec_list)
 
-    # --- Remaining distractors: 12 potential + 12 mismatch + 12 bottom = 36 ---
-    extras = (
-        [{"stim": random.choice(match),    "kind": "potential"} for _ in range(12)] +
-        [{"stim": random.choice(mismatch), "kind": "mismatch"}  for _ in range(12)] +
-        [{"stim": random.choice(bottom),   "kind": "bottom"}    for _ in range(12)]
-    )
+    # Remaining extras to distribute in gaps
+    pot_left = pot_all[12:]   # 12 left
+    mis_left = mis_all[12:]   # 12 left
+    extras   = pot_left + mis_left + bot_all  # 12 + 12 + 12 = 36
     random.shuffle(extras)
 
-    # --- Distribute extras across 25 gaps (before, between, after the 24 pairs) ---
+    # --- build pairs [preceder, target] so targets can’t be adjacent ---
+    pairs = []
+    for prec, tgt in zip(prec_list, tgt_all):
+        pairs.append([prec, tgt])
+
+    # --- distribute extras across 25 gaps: before, between, after pairs ---
     gaps = [[] for _ in range(25)]
     for ex in extras:
         gaps[random.randrange(25)].append(ex)
 
-    # --- Stitch final sequence: gap0 + pair0 + gap1 + pair1 + ... + gap24 ---
+    # --- stitch final sequence: gap0 + pair0 + gap1 + pair1 + ... + gap24 ---
     trials = []
     for i in range(24):
         trials.extend(gaps[i])
-        trials.extend(pairs[i])  # (preceder, target)
+        trials.extend(pairs[i])
     trials.extend(gaps[24])
-
-    # --- Sanity checks (fail fast if constraints are broken) ---
-    total_target   = sum(t["kind"] == "target"    for t in trials)
-    total_potential= sum(t["kind"] == "potential" for t in trials)
-    total_mismatch = sum(t["kind"] == "mismatch"  for t in trials)
-    total_bottom   = sum(t["kind"] == "bottom"    for t in trials)
-    assert total_target == 24 and total_potential == 24 and total_mismatch == 24 and total_bottom == 12, \
-        f"Counts off: target={total_target}, potential={total_potential}, mismatch={total_mismatch}, bottom={total_bottom}"
-
-    # No adjacent targets
-    assert all(not (a["kind"] == "target" and b["kind"] == "target")
-               for a, b in zip(trials, trials[1:])), "Adjacent targets found."
-
-    # Preceder balance and validity
-    preceded_by_pot = 0
-    preceded_by_mis = 0
-    for i in range(1, len(trials)):
-        if trials[i]["kind"] == "target":
-            pk = trials[i-1]["kind"]
-            assert pk in {"potential", "mismatch"}, "A target is not preceded by potential/mismatch."
-            if pk == "potential":
-                preceded_by_pot += 1
-            elif pk == "mismatch":
-                preceded_by_mis += 1
-    assert preceded_by_pot == 12 and preceded_by_mis == 12, \
-        f"Preceder imbalance: potential={preceded_by_pot}, mismatch={preceded_by_mis}"
 
     return trials
 
@@ -167,74 +147,75 @@ def show_instructions():
     misc.Clock().wait(300)
 
 # trial
+
+def flash(frame_key, over_stim=None, dur_ms=200):
+    """Flash the border for 'dur_ms' without re-clearing or re-drawing content."""
+    FRAMES[frame_key].present(clear=False, update=True)
+    misc.Clock().wait(dur_ms)
+    FRAMES["neutral"].present(clear=False, update=True)
+
 def run_trial_list(trials):
-    # Pre-blank before first trial
+    STIM_MS   = 600
+    BLANK_MS  = 1200
+    FLASH_MS  = 200
+    SAFETY_MS = 50   # stop taking input a hair before each transition
+
+    # settle
     exp.keyboard.clear()
-    present_with_frame(content_stim=None, frame_key="neutral", clear=True)
+    present_with_frame(None, "neutral", clear=True)
     misc.Clock().wait(200)
 
     for i, tr in enumerate(trials, start=1):
-        stim = tr["stim"]
-        kind = tr["kind"]
-        is_target = (kind == "target")
-        answered = False
-        rt = None
+        stim      = tr["stim"]
+        is_target = (tr["kind"] == "target")
+        answered  = False
+        rt        = None
 
-        # ---------- Stimulus epoch (600 ms) ----------
-        present_with_frame(content_stim=stim, frame_key="neutral", clear=True)
-        key, rt1 = exp.keyboard.wait([K_SPACE], duration=600)
+        # ---- STIMULUS (exactly 600 ms; image stays up the whole time) ----
+        exp.keyboard.clear()
+        t0 = misc.Clock()
+        present_with_frame(stim, "neutral", clear=True)
+
+        # accept responses until a small buffer before the flip
+        wait_ms = max(0, STIM_MS - SAFETY_MS)
+        key, rt1 = exp.keyboard.wait([K_SPACE], duration=wait_ms)
+
         if key == K_SPACE:
             answered = True
             rt = rt1
+            # flash 200 ms max, but never exceed the epoch
+            left = max(0, STIM_MS - t0.time)
+            flash("correct" if is_target else "error", over_stim=stim, dur_ms=min(FLASH_MS, left))
 
-        # ---------- Transition to BLANK (stimulus OFF at 600 ms, always) ----------
-        # Show blank + appropriate frame immediately after the stim window ends
-        if answered:
-            # If a response happened during the stim window, show colored frame over blank
-            present_with_frame(content_stim=None,
-                               frame_key=("correct" if is_target else "error"),
-                               clear=True)
-        else:
-            # No response yet: show neutral frame over blank
-            present_with_frame(content_stim=None, frame_key="neutral", clear=True)
+        # finish to 600 ms exactly (no more input)
+        rem = max(0, STIM_MS - t0.time)
+        if rem > 0:
+            misc.Clock().wait(rem)
 
-        # ---------- Blank epoch (up to 1200 ms) ----------
-        blank_total = 1200
+        # ---- BLANK (exactly 1200 ms) ----
+        exp.keyboard.clear()
+        t1 = misc.Clock()
+        present_with_frame(None, "neutral", clear=True)
+
         if not answered:
-            # Accept response during the blank; keep blank on screen regardless
-            key2, rt2 = exp.keyboard.wait([K_SPACE], duration=blank_total)
+            wait_ms = max(0, BLANK_MS - SAFETY_MS)
+            key2, rt2 = exp.keyboard.wait([K_SPACE], duration=wait_ms)
             if key2 == K_SPACE:
                 answered = True
-                rt = 600 + rt2  # accumulate RT across epochs
-                # Swap to colored frame but stay on the same blank (single flip)
-                FRAMES["correct" if is_target else "error"].present(clear=False, update=True)
-                # Wait the remaining blank time so total blank stays 1200 ms
-                remaining = max(0, blank_total - rt2)
-                if remaining > 0:
-                    misc.Clock().wait(remaining)
-            else:
-                # No response during blank; we've already displayed the full 1200 ms
-                pass
-        else:
-            # Already answered during the stimulus epoch; keep the colored frame on blank for full 1200 ms
-            misc.Clock().wait(blank_total)
+                rt = STIM_MS + rt2
+                left = max(0, BLANK_MS - t1.time)
+                flash("correct" if is_target else "error", over_stim=None, dur_ms=min(FLASH_MS, left))
 
-        # ---------- Feedback flash (200 ms) ----------
-        if answered:
-            present_with_frame(content_stim=None,
-                               frame_key=("correct" if is_target else "error"),
-                               clear=True)
-            misc.Clock().wait(200)
+        # finish to 1200 ms exactly (no more input)
+        rem = max(0, BLANK_MS - t1.time)
+        if rem > 0:
+            misc.Clock().wait(rem)
 
-        # ---------- Save data ----------
+        # ---- SAVE ----
         correct = (answered and is_target) or (not answered and not is_target)
         exp.data.add([
-            SUBJECT_ID,
-            i,
-            getattr(stim, "filename", "unknown"),
-            kind,
-            rt if rt else "",
-            correct
+            SUBJECT_ID, i, getattr(stim, "filename", "unknown"),
+            tr["kind"], (rt if answered else ""), correct
         ])
 
 # run experiment
@@ -255,7 +236,3 @@ def run_experiment():
 
 # main
 run_experiment()
-
-### TODO ###
-# 1) exact timing (take time of drawing into account)
-# 2) when SPACE in pressed, the image disappears (and i dont think we want that)
