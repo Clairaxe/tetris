@@ -2,244 +2,207 @@ from expyriment import design, control, stimuli, misc
 from expyriment.misc.constants import C_WHITE, C_BLACK, K_SPACE
 import os, sys, random
 
-"""
-Confusing Possible Objects for Actual Objects:
 
-Task: Go/No-Go — press SPACE only when the full 5x5 square appears (target).
-Other stimuli (potential, no_potential, bottom-only) require no response.
+EXP_NAME = "Tetris Detection"
+IMG_DIR = "images"
+SUBJECT_ID = 1
 
-Timing: 
-- Stimulus on screen for 600 ms
-- Then blank for 1200 ms
-- Responses accepted for entire 1800 ms
-- Feedback flash (if any) lasts 200 ms
-
-Trial structure:
-- 24 target
-- 24 potential (6 images x 4 repetitions)
-- 24 no_potential (6 images x 4 repetitions)
-- 12 bottom-only (6 images x 2 repetitions)
-- 84 total trials
-- Half of targets preceded by potential, half by no_potential
-"""
-
-# ----------------------------------------------------------------------
-# Global settings
-# ----------------------------------------------------------------------
-
-exp = design.Experiment(name="Tetris Detection", background_colour=C_WHITE, foreground_colour=C_BLACK)
-exp.add_data_variable_names(["subject_id", "trial_id", "stim_name", "stim_type", "is_target", "RT_ms", "correct"])
-control.set_develop_mode()
+exp = design.Experiment(name=EXP_NAME, background_colour=C_WHITE, foreground_colour=C_BLACK)
+exp.add_data_variable_names(["subject_id", "trial_num", "stim_name", "kind", "RT_ms", "correct"])
+control.set_develop_mode()      # comment out for real timing
 control.initialize(exp)
 
-SUBJECT_ID = 1
-IMG_DIR = "images"
 ww, wl = exp.screen.size
 
-# ----------------------------------------------------------------------
-# Helper functions
-# ----------------------------------------------------------------------
+# handes stimulus loadings etc. 
 
-def timed_draw(stims):
-    """Present a list of stimuli and return the draw time (ms)."""
-    clock = misc.Clock()
-    t0 = clock.time
-    for stim in stims:
-        stim.present()
-    t1 = clock.time
-    return t1 - t0
+def load_photo_stim(path):
+    return stimuli.Picture(path)
 
-def present_for(stims, t=1000):
-    """Present stimuli for a fixed duration (accounting for draw time)."""
-    clock = misc.Clock()
-    draw_time = timed_draw(stims)
-    clock.wait(t - draw_time)
-
-def window(color):
-    """Create a colored border frame (used for feedback)."""
-    vertices = misc.geometry.vertices_frame((ww, wl), frame_thickness=10)
-    frame = stimuli.Shape(vertex_list=vertices, colour=color)
-    frame.preload()
-    return frame
-
-# ----------------------------------------------------------------------
-# Stimulus loading
-# ----------------------------------------------------------------------
-
-def load_stimuli_from_folder(path):
+def split_stims(path):
     img_dir = os.path.join(os.path.dirname(sys.argv[0]), path)
-    if not os.path.exists(img_dir):
-        raise FileNotFoundError(f"Image directory not found: {img_dir}")
-
     all_files = [f for f in os.listdir(img_dir) if f.endswith(".png")]
     if not all_files:
         raise FileNotFoundError("No .png files found in ./images/")
 
-    stims = {
-        "target": [stimuli.Picture(os.path.join(img_dir, f)) for f in all_files if f == "target.png"],
-        "potential": [stimuli.Picture(os.path.join(img_dir, f)) for f in all_files if f.startswith("potential_")],
-        "no_potential": [stimuli.Picture(os.path.join(img_dir, f)) for f in all_files if f.startswith("no_potential_")],
-        "bottom": [stimuli.Picture(os.path.join(img_dir, f)) for f in all_files if f.startswith("bottom_")],
-    }
+    square   = [os.path.join(img_dir, f) for f in all_files if f == "square.png"]
+    match    = [os.path.join(img_dir, f) for f in all_files if f.startswith("match_")]
+    mismatch = [os.path.join(img_dir, f) for f in all_files if f.startswith("mismatch_")]
+    bottom   = [os.path.join(img_dir, f) for f in all_files if f.startswith("bottom_")]
 
-    for cat in stims.values():
-        for stim in cat:
-            stim.preload()
+    square_stims   = [load_photo_stim(p) for p in square]
+    match_stims    = [load_photo_stim(p) for p in match]
+    mismatch_stims = [load_photo_stim(p) for p in mismatch]
+    bottom_stims   = [load_photo_stim(p) for p in bottom]
 
-    return stims
+    for cat in [square_stims, match_stims, mismatch_stims, bottom_stims]:
+        for s in cat:
+            s.preload()
 
-# ----------------------------------------------------------------------
-# Trial list creation
-# ----------------------------------------------------------------------
+    print(f"Loaded: square={len(square_stims)}, match={len(match_stims)}, mismatch={len(mismatch_stims)}, bottom={len(bottom_stims)}")
+    return square_stims, match_stims, mismatch_stims, bottom_stims
 
-def make_trial_list(stims):
-    """Create 84 trials with correct repetition structure."""
-    trials = []
+# handles the color border 
 
-    # 24 target (same image repeated 24×)
-    for _ in range(24):
-        stim = stims["target"][0]
-        trials.append({"stim_type": "target", "stim": stim,
-                       "stim_name": os.path.basename(stim.filename),
-                       "is_target": True})
+def make_frames():
+    """Prebuild and preload the 3 frame variants to avoid per-trial creation and flicker."""
+    verts = misc.geometry.vertices_frame((ww, wl), frame_thickness=10)
+    fr_neutral = stimuli.Shape(vertex_list=verts, colour=(0, 0, 0))     # black
+    fr_correct = stimuli.Shape(vertex_list=verts, colour=(0, 255, 0))   # green
+    fr_error   = stimuli.Shape(vertex_list=verts, colour=(255, 0, 0))   # red
+    for fr in (fr_neutral, fr_correct, fr_error):
+        fr.preload()
+    return {"neutral": fr_neutral, "correct": fr_correct, "error": fr_error}
 
-    # 24 potential (6 images × 4)
-    for s in stims["potential"]:
-        for _ in range(4):
-            trials.append({"stim_type": "potential", "stim": s,
-                           "stim_name": os.path.basename(s.filename),
-                           "is_target": False})
+FRAMES = make_frames()
 
-    # 24 no-potential (6 images × 4)
-    for s in stims["no_potential"]:
-        for _ in range(4):
-            trials.append({"stim_type": "no_potential", "stim": s,
-                           "stim_name": os.path.basename(s.filename),
-                           "is_target": False})
+def present_with_frame(content_stim=None, frame_key="neutral", clear=True):
+    """
+    Composite draw & single flip:
+    - Optionally clear the screen (white background).
+    - Draw the content (if any) without flipping.
+    - Draw the chosen frame.
+    - Flip once.
+    """
+    if clear:
+        exp.screen.clear()
+    if content_stim is not None:
+        content_stim.present(clear=False, update=False)  # blit only
+    FRAMES[frame_key].present(clear=False, update=True)  # this flips
 
-    # 12 bottom-only (6 images × 2)
-    for s in stims["bottom"]:
-        for _ in range(2):
-            trials.append({"stim_type": "bottom", "stim": s,
-                           "stim_name": os.path.basename(s.filename),
-                           "is_target": False})
+# trial creation
+
+def make_stim_list(square, match, mismatch, bottom):
+    # Keep kinds separate (target, potential, mismatch, bottom)
+    trials = (
+        [{"stim": random.choice(square),   "kind": "target"}     for _ in range(24)] +
+        [{"stim": random.choice(match),    "kind": "potential"}  for _ in range(24)] +
+        [{"stim": random.choice(mismatch), "kind": "mismatch"}   for _ in range(24)] +
+        [{"stim": random.choice(bottom),   "kind": "bottom"}     for _ in range(12)]
+    )
+    random.shuffle(trials)
+
+    # Balance: among targets, ~half preceded by potential, ~half by mismatch (as in the paper)
+    def next_kind(i):
+        if i >= len(trials) - 1:
+            return None
+        return trials[i + 1]["kind"]
+
+    tries = 0
+    while True:
+        pot = sum(1 for i, t in enumerate(trials[:-1]) if t["kind"] == "target" and next_kind(i) == "potential")
+        mis = sum(1 for i, t in enumerate(trials[:-1]) if t["kind"] == "target" and next_kind(i) == "mismatch")
+        if pot == mis or tries > 5000:
+            break
+        random.shuffle(trials)
+        tries += 1
 
     return trials
 
-def make_trial_sequence(stims):
-    """Create sequence with half targets preceded by potential, half by no_potential."""
-    targets = [{"stim_type": "target", "stim": stims["target"][0],
-                "stim_name": "target.png", "is_target": True} for _ in range(24)]
+# instructions
 
-    potential_trials = [{"stim_type": "potential", "stim": s,
-                         "stim_name": os.path.basename(s.filename), "is_target": False}
-                        for s in stims["potential"] for _ in range(4)]
-    no_potential_trials = [{"stim_type": "no_potential", "stim": s,
-                            "stim_name": os.path.basename(s.filename), "is_target": False}
-                           for s in stims["no_potential"] for _ in range(4)]
-    bottom_trials = [{"stim_type": "bottom", "stim": s,
-                      "stim_name": os.path.basename(s.filename), "is_target": False}
-                     for s in stims["bottom"] for _ in range(2)]
-
-    random.shuffle(potential_trials)
-    random.shuffle(no_potential_trials)
-    random.shuffle(bottom_trials)
-
-    seq = []
-    # 12 potential–target pairs
-    for _ in range(12):
-        seq.append(potential_trials.pop())
-        seq.append(targets.pop())
-    # 12 no_potential–target pairs
-    for _ in range(12):
-        seq.append(no_potential_trials.pop())
-        seq.append(targets.pop())
-
-    # add remaining potential, no_potential, bottom randomly
-    leftover = potential_trials + no_potential_trials + bottom_trials
-    random.shuffle(leftover)
-    seq += leftover
-    random.shuffle(seq)
-
-    return seq
-
-# ----------------------------------------------------------------------
-# Instructions phase
-# ----------------------------------------------------------------------
-
-def show_instructions(stims):
-    examples = [
-        ("target", "Press the spacebar!"),
-        ("potential", "DO NOT press the spacebar!"),
-        ("no_potential", "DO NOT press the spacebar!"),
-        ("bottom", "DO NOT press the spacebar!"),
-    ]
-    for cat, msg in examples:
-        stim = random.choice(stims[cat])
-        stim.present(clear=True)
-        text = stimuli.TextLine(msg, position=(0, -wl // 3))
-        text.present(clear=False, update=True)
-        exp.keyboard.wait([K_SPACE])
-    final = stimuli.TextScreen(
-        "Ready?",
-        "Press SPACE only when you see a full 5×5 square.\n\n"
-        "Try to be fast and precise.\n\nPress SPACE to begin."
+def show_instructions():
+    instr = stimuli.TextScreen(
+        "Welcome!",
+        "Press the SPACEBAR only when you see a full 5×5 square.\n\n"
+        "Do NOT press for any other shapes.\n\n"
+        "Try to be fast but accurate.\n\n"
+        "Press SPACE to begin."
     )
-    final.present()
+    instr.present()
     exp.keyboard.wait([K_SPACE])
 
-# ----------------------------------------------------------------------
-# Trial procedure
-# ----------------------------------------------------------------------
+    # Flush keyboard and show a short neutral foreperiod to avoid residual keypress and frame persistence
+    exp.keyboard.clear()
+    present_with_frame(content_stim=None, frame_key="neutral", clear=True)
+    misc.Clock().wait(300)
 
-def run_trial(trial_id, stim, stim_name, stim_type, is_target):
-    clock = misc.Clock()
-    frame_black = window((0, 0, 0))
+# trial
+def run_trial_list(trials):
+    # Pre-blank before first trial
+    exp.keyboard.clear()
+    present_with_frame(content_stim=None, frame_key="neutral", clear=True)
+    misc.Clock().wait(200)
 
-    # --- Present stimulus (600 ms) ---
-    stim.present(clear=True, update=False)
-    frame_black.present(clear=False, update=True)
+    for i, tr in enumerate(trials, start=1):
+        stim = tr["stim"]
+        kind = tr["kind"]
+        is_target = (kind == "target")
+        answered = False
+        rt = None
 
-    # Accept responses for total 1800 ms
-    key, rt = exp.keyboard.wait([K_SPACE], duration=1800)
-    response_taken = key == K_SPACE
+        # ---------- Stimulus epoch (600 ms) ----------
+        present_with_frame(content_stim=stim, frame_key="neutral", clear=True)
+        key, rt1 = exp.keyboard.wait([K_SPACE], duration=600)
+        if key == K_SPACE:
+            answered = True
+            rt = rt1
 
-    # --- Feedback (only if pressed) ---
-    if response_taken:
-        correct = is_target
-        color = (0, 255, 0) if correct else (255, 0, 0)
-        fb = window(color)
-        present_for([fb], t=200)
-    else:
-        correct = not is_target
+        # ---------- Transition to BLANK (stimulus OFF at 600 ms, always) ----------
+        # Show blank + appropriate frame immediately after the stim window ends
+        if answered:
+            # If a response happened during the stim window, show colored frame over blank
+            present_with_frame(content_stim=None,
+                               frame_key=("correct" if is_target else "error"),
+                               clear=True)
+        else:
+            # No response yet: show neutral frame over blank
+            present_with_frame(content_stim=None, frame_key="neutral", clear=True)
 
-    # Ensure total trial duration = 1800 ms
-    elapsed = clock.time
-    remaining = max(0, 1800 - elapsed)
-    clock.wait(remaining)
+        # ---------- Blank epoch (up to 1200 ms) ----------
+        blank_total = 1200
+        if not answered:
+            # Accept response during the blank; keep blank on screen regardless
+            key2, rt2 = exp.keyboard.wait([K_SPACE], duration=blank_total)
+            if key2 == K_SPACE:
+                answered = True
+                rt = 600 + rt2  # accumulate RT across epochs
+                # Swap to colored frame but stay on the same blank (single flip)
+                FRAMES["correct" if is_target else "error"].present(clear=False, update=True)
+                # Wait the remaining blank time so total blank stays 1200 ms
+                remaining = max(0, blank_total - rt2)
+                if remaining > 0:
+                    misc.Clock().wait(remaining)
+            else:
+                # No response during blank; we've already displayed the full 1200 ms
+                pass
+        else:
+            # Already answered during the stimulus epoch; keep the colored frame on blank for full 1200 ms
+            misc.Clock().wait(blank_total)
 
-    # --- Save data ---
-    exp.data.add([SUBJECT_ID, trial_id, stim_name, stim_type, is_target, rt if rt else "", correct])
+        # ---------- Feedback flash (200 ms) ----------
+        if answered:
+            present_with_frame(content_stim=None,
+                               frame_key=("correct" if is_target else "error"),
+                               clear=True)
+            misc.Clock().wait(200)
 
-# ----------------------------------------------------------------------
-# Experiment control
-# ----------------------------------------------------------------------
+        # ---------- Save data ----------
+        correct = (answered and is_target) or (not answered and not is_target)
+        exp.data.add([
+            SUBJECT_ID,
+            i,
+            getattr(stim, "filename", "unknown"),
+            kind,
+            rt if rt else "",
+            correct
+        ])
+
+# run experiment
 
 def run_experiment():
-    stims = load_stimuli_from_folder(IMG_DIR)
-    trials = make_trial_sequence(stims)
+    square, match, mismatch, bottom = split_stims(IMG_DIR)
+    trials = make_stim_list(square, match, mismatch, bottom)
 
     control.start(subject_id=SUBJECT_ID)
 
-    show_instructions(stims)
+    show_instructions()
+    run_trial_list(trials)
 
-    for i, trial in enumerate(trials, 1):
-        run_trial(i, trial["stim"], trial["stim_name"], trial["stim_type"], trial["is_target"])
-
-    end = stimuli.TextScreen("Over", "Thank you for your participation!")
+    end = stimuli.TextScreen("End", "Thank you for participating!\n\nPress SPACE to finish.")
     end.present()
     exp.keyboard.wait([K_SPACE])
     control.end()
 
-
+# main
 run_experiment()
