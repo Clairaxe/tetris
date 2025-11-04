@@ -235,10 +235,15 @@ def run_trial_list(trials):
 
 def run_experiment():
     square, match, mismatch, bottom = split_stims(IMG_DIR)
+
+    DEMO = True  # set False for the full experiment
+
     trials = build_balanced_trials(square, match, mismatch, bottom)
 
-    control.start(subject_id=SUBJECT_ID)
+    if DEMO:
+        trials = trials[:12] # only 12 trials
 
+    control.start(subject_id=SUBJECT_ID)
     show_instructions()
     run_trial_list(trials)
 
