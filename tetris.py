@@ -1,10 +1,9 @@
 from expyriment import design, control, stimuli, misc
 from expyriment.misc.constants import C_WHITE, C_BLACK, K_SPACE
 import os, sys, random
-from collections import Counter, defaultdict
 
 # Config
-EXPERIMENT_NAME = "Full-5x5 Task"
+EXPERIMENT_NAME = "Tetris : Impressions of possibility"
 IMG_DIR = "images"
 SUBJECT_ID = 1
 
@@ -20,7 +19,7 @@ exp = design.Experiment(
     foreground_colour=C_BLACK
 )
 exp.add_data_variable_names(
-    ["block", "trial_number", "kind", "image_name", "rt_ms", "pressed", "correct"]
+    ["trial_number", "kind", "image_name", "rt_ms", "pressed", "correct"]
 )
 control.set_develop_mode()
 control.initialize(exp)
@@ -102,7 +101,6 @@ def build_balanced_trials(square_stim, match_stims, mismatch_stims, bottom_stims
     non_targets += expand(match_stims,    4, "potential")    # 24
     non_targets += expand(mismatch_stims, 4, "mismatch")     # 24
     non_targets += expand(bottom_stims,   2, "bottom")       # 12
-    assert len(non_targets) == 60
 
     # Shuffle non-targets
     random.shuffle(non_targets)
@@ -173,7 +171,7 @@ def show_instructions():
     misc.Clock().wait(300)
 
 # trials
-def run_trial_list(trials, block=1):
+def run_trial_list(trials):
     clock = misc.Clock()
     trial_nr = 0
 
@@ -184,8 +182,6 @@ def run_trial_list(trials, block=1):
         img_name = tr["name"]
 
         # Phase 1: stimulus + frame, monitor SPACE for PHASE_STIM_MS
-        rt = None
-        pressed = False
         correct = None
 
         t0 = clock.time
@@ -193,12 +189,10 @@ def run_trial_list(trials, block=1):
         # Wait for response within the remaining time after draw
         t1 = clock.time
         remain = max(0, PHASE_STIM_MS - (t1 - t0))
-        key, rt1 = exp.keyboard.wait([K_SPACE], duration=remain)
+        key, _ = exp.keyboard.wait([K_SPACE], duration=remain)
 
         if key == K_SPACE:
-            pressed = True
             correct = bool(is_target)
-            rt = rt1  # Expyriment returns RT in ms since present()
             # Flash feedback for 200 ms
             present_with_frame(stim, "correct" if correct else "incorrect", clear=True, update=True)
             misc.Clock().wait(BORDER_FLASH_MS)
@@ -208,16 +202,6 @@ def run_trial_list(trials, block=1):
             if leftover > 0:
                 present_with_frame(stim, "neutral", clear=True, update=True)
                 misc.Clock().wait(leftover)
-
-        else:
-            pressed = False
-            correct = (not is_target)  # no press is correct if not a target
-
-        # Log phase 1 result
-        exp.data.add(
-            [block, trial_nr, ("target" if is_target else tr["kind"]), img_name, rt if rt is not None else -1,
-             int(pressed), int(correct)]
-        )
 
         # Phase 2: blank frame, still monitor for PHASE_BLANK_MS
         # Reset for phase-2 press
@@ -241,12 +225,12 @@ def run_trial_list(trials, block=1):
                 present_with_frame(None, "neutral", clear=True, update=True)
                 misc.Clock().wait(leftover)
 
-            exp.data.add([block, trial_nr, ("target" if is_target else tr["kind"]), img_name,
-                          rt2 if rt2 is not None else -1, int(pressed2), int(correct2)])
+            exp.data.add([trial_nr, ("target" if is_target else tr["kind"]), img_name,
+                          rt2, int(pressed2), int(correct2)])
         else:
             pressed2 = False
             correct2 = (not is_target)
-            exp.data.add([block, trial_nr, ("target" if is_target else tr["kind"]), img_name,
+            exp.data.add([trial_nr, ("target" if is_target else tr["kind"]), img_name,
                           -1, int(pressed2), int(correct2)])
 
 def run_experiment():
