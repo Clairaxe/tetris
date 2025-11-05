@@ -1,191 +1,256 @@
 from expyriment import design, control, stimuli, misc
-from expyriment.misc.constants import C_WHITE, C_BLACK, C_BLUE,C_RED,C_GREEN,C_EXPYRIMENT_ORANGE, K_1, K_2, K_SPACE
-import os, sys
-import random
+from expyriment.misc.constants import C_WHITE, C_BLACK, K_SPACE
+import os, sys, random
 
-'''
+# Config
+EXPERIMENT_NAME = "Tetris : Impressions of possibility"
+IMG_DIR = "images"
+SUBJECT_ID = 1
 
-cycle(grid):
-    for 600ms
-        input = keyboard
-        render window(answer_taken, full=grid.match)
-        render grid
-    for 1200ms
-        input = keyboard
-        render window(answer_taken, full=grid.match)
+# Durations (ms)
+PHASE_STIM_MS = 600
+PHASE_BLANK_MS = 1200
+BORDER_FLASH_MS = 200
 
-window(answer_taken=False,full=None):
-    if answer_taken == True and full == True:
-        return the window green
-    elif answer_taken == True and full == False:
-        return the window red
-    else 
-        return the window black
-
-class Grid(grid_combinations):
-    grid = rand.choice(grid_combinations)
-    while 1:
-        if conditions met:
-            break
-        else:
-            grid = rand.choice(grid_combinations)
-    match = grid.match
-
-experiment(grid_combinations):
-    grid = Grid(grid_combinations)
-    for i in range(84)
-        cycle(grid)
-        
-'''
-
-""" Global settings """
-exp = design.Experiment(name="Stroop", background_colour=C_WHITE, foreground_colour=C_BLACK)
-exp.add_data_variable_names(["trial block","trial number", "trial type", "word","text color", "RTs(ms)", "accuracy"])
+# experiment init
+exp = design.Experiment(
+    name=EXPERIMENT_NAME,
+    background_colour=C_WHITE,
+    foreground_colour=C_BLACK
+)
+exp.add_data_variable_names(
+    ["trial_number", "kind", "image_name", "rt_ms", "pressed", "correct"]
+)
 control.set_develop_mode()
 control.initialize(exp)
-
 ww, wl = exp.screen.size
 
-IMG_DIR = "images"
-
+# helpers
 def load(stims):
-    for stim in stims:
-        stim.preload()
-    
+    for s in stims:
+        s.preload()
 
-def timed_draw(stims):
-    clock = misc.Clock()
-    t0 = clock.time
-    for stim in stims:
-        stim.present()
-    t1 = clock.time
-    return t1-t0
-    # return the time it took to draw
-
-def present_for(stims, t=1000):
-    clock = misc.Clock()
-    time = timed_draw(stims)
-    clock.wait(t-time)
-
-""" Stimuli """
 def load_photo_stim(path):
-    stim = stimuli.Picture(path, (0.0))
-    return stim
+    # Centered by default
+    return stimuli.Picture(path)
 
-def split_stims(path):
-    img_dir = os.path.join(os.path.dirname(sys.argv[0]), path)
+def split_stims(path_dir):
+    img_dir = os.path.join(os.path.dirname(sys.argv[0]), path_dir)
     if not os.path.exists(img_dir):
         raise FileNotFoundError(f"Image directory not found: {img_dir}")
 
-    all_files = [f for f in os.listdir(img_dir) if f.endswith(".png")]
-    if not all_files:
+    all_png = [f for f in os.listdir(img_dir) if f.endswith(".png")]
+    if not all_png:
         raise FileNotFoundError("No .png files found in ./images/")
-    
-    square = [os.path.join(img_dir,f) for f in all_files if f == "square.png"]
-    mismatch = [os.path.join(img_dir,f) for f in all_files if f.startswith("mismatch_")]
-    match = [os.path.join(img_dir,f) for f in all_files if f.startswith("match_")]
-    bottom = [os.path.join(img_dir,f) for f in all_files if f.startswith("bottom_")]
 
-    mismatch.sort()
-    match.sort()
-    bottom.sort()
-    square_stims   = [load_photo_stim(p) for p in square]
-    match_stims    = [load_photo_stim(p) for p in match]
-    mismatch_stims = [load_photo_stim(p) for p in mismatch]
-    bottom_stims   = [load_photo_stim(p) for p in bottom]
-    
-    load(square_stims)
-    load(match_stims)
-    load(mismatch_stims)
-    load(bottom_stims)
+    square_files   = [f for f in all_png if f == "square.png"]
+    match_files    = sorted([f for f in all_png if f.startswith("match_")])
+    mismatch_files = sorted([f for f in all_png if f.startswith("mismatch_")])
+    bottom_files   = sorted([f for f in all_png if f.startswith("bottom_")])
 
-    return square_stims, match_stims, mismatch_stims, bottom_stims
+    if len(square_files) != 1:
+        raise RuntimeError("Expect exactly one 'square.png'.")
 
+    if len(match_files) != 6 or len(mismatch_files) != 6 or len(bottom_files) != 6:
+        raise RuntimeError("Expect match_1..6, mismatch_1..6, bottom_1..6.")
 
-def make_stim_list(square, match, mismatch, bottom):
-    trials = (
-    [{"stim": random.choice(square),   "kind": "target"}      for _ in range(24)] +
-    [{"stim": random.choice(match),    "kind": "potential"}   for _ in range(24)] +
-    [{"stim": random.choice(mismatch), "kind": "non_potential"}for _ in range(24)] +
-    [{"stim": random.choice(bottom),   "kind": "non_potential"}      for _ in range(12)]#make sure the bottoms are considered non-potential
-    )
+    # Build stimuli dicts with image name for logging
+    square_path = os.path.join(img_dir, square_files[0])
+    square_stim = load_photo_stim(square_path)
 
-    random.shuffle(trials)
+    def mk_stims(files):
+        out = []
+        for f in files:
+            p = os.path.join(img_dir, f)
+            out.append({"stim": load_photo_stim(p), "name": f})
+        return out
 
-    def nex_kind(i):
-        if i == len(trials) - 1:
-            return None
-        k = trials[i+1]["kind"]
-        return k
-    
-    while True:
-        potentials = sum(1 for i,t in enumerate(trials[:-1]) if t["kind"] == "target" and nex_kind(i)=="potential")
-        non_potentials = sum(1 for i,t in enumerate(trials[:-1]) if t["kind"] == "target" and nex_kind(i)=="non_potential")
-        if potentials==non_potentials:
-            break
+    match_stims = mk_stims(match_files)
+    mismatch_stims = mk_stims(mismatch_files)
+    bottom_stims = mk_stims(bottom_files)
 
-        random.shuffle(trials)
+    # Preload
+    load([square_stim] + [d["stim"] for d in match_stims + mismatch_stims + bottom_stims])
+
+    return square_stim, match_stims, mismatch_stims, bottom_stims
+
+def build_balanced_trials(square_stim, match_stims, mismatch_stims, bottom_stims):
+    """
+      Images present:
+        bottom_1..6, match_1..6, mismatch_1..6, square
+      Counts per image:
+        match_i:     4 each  (24 total potential)
+        mismatch_i:  4 each  (24 total mismatch)
+        bottom_i:    2 each  (12 total bottom)
+        square:      24 total targets
+      Constraints:
+        * No adjacent targets
+        * Exactly 12 targets preceded by 'potential' (match) and 12 by 'mismatch'
+        * Targets are never preceded by 'bottom'
+    """
+
+    # Expand non-target pools with exact counts
+    def expand(items, count_each, kind):
+        bag = []
+        for d in items:
+            for _ in range(count_each):
+                bag.append({"kind": kind, "stim": d["stim"], "name": d["name"]})
+        return bag
+
+    non_targets = []
+    non_targets += expand(match_stims,    4, "potential")    # 24
+    non_targets += expand(mismatch_stims, 4, "mismatch")     # 24
+    non_targets += expand(bottom_stims,   2, "bottom")       # 12
+
+    # Shuffle non-targets
+    random.shuffle(non_targets)
+
+    # Choose exactly 12 potentials and 12 mismatches that will be followed by a target
+    potential_idxs = [i for i, t in enumerate(non_targets) if t["kind"] == "potential"]
+    mismatch_idxs  = [i for i, t in enumerate(non_targets) if t["kind"] == "mismatch"]
+
+    chosen_p = set(random.sample(potential_idxs, 12))
+    chosen_m = set(random.sample(mismatch_idxs, 12))
+
+    # Mark flags on a copy
+    for i, t in enumerate(non_targets):
+        t["followed_by_target"] = (i in chosen_p) or (i in chosen_m)
+
+    # Assemble final trial list: for each non-target, append it; if flagged, append a target after it
+    trials = []
+    for t in non_targets:
+        trials.append({
+            "kind": t["kind"],
+            "stim": t["stim"],
+            "name": t["name"],
+            "is_target": False
+        })
+        if t["followed_by_target"]:
+            trials.append({
+                "kind": "target",
+                "stim": square_stim,
+                "name": "square.png",
+                "is_target": True
+            })
 
     return trials
 
+# frames
+def make_frame(colour_rgb):
+    vertices = misc.geometry.vertices_frame((ww, wl), frame_thickness=10)
+    fr = stimuli.Shape(vertex_list=vertices, colour=colour_rgb)
+    fr.preload()
+    return fr
 
-def window(answer_taken, target):
-    vertices = misc.geometry.vertices_frame((ww,wl), frame_thickness=10)
-    if answer_taken and target == True:
-        frame = stimuli.Shape(vertex_list=vertices,colour=(0,255,0))
-        load([frame])
-        return frame
-    elif answer_taken and target == False:
-        frame = stimuli.Shape(vertex_list=vertices,colour=(255,0,0))
-        load([frame])
-        return frame
-    else:
-        frame = stimuli.Shape(vertex_list=vertices,colour=(0,0,0))
-        load([frame])
-        return frame
-
-
-
-keys_chars = {
-    49: 'K_1',
-    50: 'K_2',
-    32: 'sPACE'
+FRAMES = {
+    "neutral": make_frame((0, 0, 0)),
+    "correct": make_frame((0, 255, 0)),
+    "incorrect": make_frame((255, 0, 0)),
 }
 
-""" Experiment """
-def run_trial():
-    square, match, mismatch, bottom = split_stims(IMG_DIR)
-    trial_list = make_stim_list(square=square,match=match,mismatch=mismatch,bottom=bottom)
-    answer = False
+def present_with_frame(content_stim=None, frame_key="neutral", clear=True, update=True):
+    if content_stim is not None:
+        content_stim.present(clear=clear, update=False)
+        FRAMES[frame_key].present(clear=False, update=update)
+    else:
+        FRAMES[frame_key].present(clear=clear, update=update)
+
+def show_instructions():
+    instructions = stimuli.TextScreen(
+        "Welcome!",
+        "Press the SPACEBAR only when you see a full 5x5 square.\n\n"
+        "Do NOT press for any other shapes.\n\n"
+        "Try to be fast but accurate.\n\n"
+        "Press SPACE to begin."
+    )
+    instructions.present()
+    exp.keyboard.wait([K_SPACE])
+
+    exp.keyboard.clear()
+    present_with_frame(content_stim=None, frame_key="neutral", clear=True)
+    misc.Clock().wait(300)
+
+# trials
+def run_trial_list(trials):
     clock = misc.Clock()
-    for stim in trial_list:
-        answer = False
-        ##frame with the stim with constant check 600ms
-        #for _ in range(60):
+    trial_nr = 0
+
+    for tr in trials:
+        trial_nr += 1
+        is_target = tr["is_target"]
+        stim = tr["stim"]
+        img_name = tr["name"]
+
+        # Phase 1: stimulus + frame, monitor SPACE for PHASE_STIM_MS
+        correct = None
+
         t0 = clock.time
-        stim["stim"].present(clear=True,update=False)
-        target = stim["kind"] == "target"
-        frame = window(answer, target=target)
-        frame.present(clear=False, update=True)
+        present_with_frame(stim, "neutral", clear=True, update=True)
+        # Wait for response within the remaining time after draw
         t1 = clock.time
-        t = max(0,t1-t0)
-        key, _ =  exp.keyboard.wait(keys = K_SPACE, duration = 600-t)
-        answer = (key == K_SPACE) ^ answer 
+        remain = max(0, PHASE_STIM_MS - (t1 - t0))
+        key, _ = exp.keyboard.wait([K_SPACE], duration=remain)
 
-        ##blank frame with constant check 1200ms
-        #for _ in range(120):
+        if key == K_SPACE:
+            correct = bool(is_target)
+            # Flash feedback for 200 ms
+            present_with_frame(stim, "correct" if correct else "incorrect", clear=True, update=True)
+            misc.Clock().wait(BORDER_FLASH_MS)
+            # Return to neutral for leftover of the phase (if any)
+            elapsed = (clock.time - t0)
+            leftover = max(0, PHASE_STIM_MS - elapsed)
+            if leftover > 0:
+                present_with_frame(stim, "neutral", clear=True, update=True)
+                misc.Clock().wait(leftover)
+
+        # Phase 2: blank frame, still monitor for PHASE_BLANK_MS
+        # Reset for phase-2 press
         t0 = clock.time
-        frame = window(answer, target=target)
-        frame.present(clear=True, update=True) 
+        present_with_frame(None, "neutral", clear=True, update=True)
         t1 = clock.time
-        t = max(0,t1-t0)
-        key, _ =  exp.keyboard.wait(keys = K_SPACE, duration = 1200-t)
-        answer = (key == K_SPACE) ^ answer 
+        remain = max(0, PHASE_BLANK_MS - (t1 - t0))
+        key, rt2 = exp.keyboard.wait([K_SPACE], duration=remain)
 
+        if key == K_SPACE:
+            # Late press: evaluate against same target label
+            pressed2 = True
+            correct2 = bool(is_target)
+            # Flash only 200 ms
+            present_with_frame(None, "correct" if correct2 else "incorrect", clear=True, update=True)
+            misc.Clock().wait(BORDER_FLASH_MS)
+            # Then neutral for remainder
+            elapsed = (clock.time - t0)
+            leftover = max(0, PHASE_BLANK_MS - elapsed)
+            if leftover > 0:
+                present_with_frame(None, "neutral", clear=True, update=True)
+                misc.Clock().wait(leftover)
 
+            exp.data.add([trial_nr, ("target" if is_target else tr["kind"]), img_name,
+                          rt2, int(pressed2), int(correct2)])
+        else:
+            pressed2 = False
+            correct2 = (not is_target)
+            exp.data.add([trial_nr, ("target" if is_target else tr["kind"]), img_name,
+                          -1, int(pressed2), int(correct2)])
 
-control.start(subject_id=1)
+def run_experiment():
+    square, match, mismatch, bottom = split_stims(IMG_DIR)
 
-run_trial()
-    
-control.end()
+    DEMO = True  # set False for the full experiment
+
+    trials = build_balanced_trials(square, match, mismatch, bottom)
+
+    if DEMO:
+        trials = trials[:12] # only 12 trials
+
+    control.start(subject_id=SUBJECT_ID)
+    show_instructions()
+    run_trial_list(trials)
+
+    end = stimuli.TextScreen("End", "Thank you for participating!\n\nPress SPACE to finish.")
+    end.present()
+    exp.keyboard.wait([K_SPACE])
+    control.end()
+
+# main
+run_experiment()
