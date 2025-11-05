@@ -1,0 +1,58 @@
+#Expyriment 1.0.0 (Python 3.12.12), .xpe-file, coding: UTF-8
+#date: Sun Nov 02 2025 21:59:28
+#sha1: e8ea87
+#modules: 
+#display: size=(800, 600), window_mode=True, opengl=2
+#os: uname_result(system='Darwin', node='Saruhans-MacBook-Pro.local', release='24.6.0', version='Darwin Kernel Version 24.6.0: Mon Aug 11 21:15:09 PDT 2025; root:xnu-11417.140.69.701.11~1/RELEASE_ARM64_T6041', machine='arm64')
+Time,Type,Event,Value,Detail,Detail2
+5095,design,log,
+#design: #exp: Stroop
+#design: #dvn: trial block,trial number,trial type,word,text color,RTs(ms),accuracy
+#design: block_cnt,block_id,trial_cnt,trial_id
+5095,design,logged,
+5095,Experiment,started
+5095,Picture,loaded,images/square.png
+5096,Picture,loaded,images/square.png
+5096,Picture,loaded,images/match_1.png
+5097,Picture,loaded,images/match_1.png
+5097,Picture,loaded,images/match_2.png
+5098,Picture,loaded,images/match_2.png
+5098,Picture,loaded,images/match_3.png
+5099,Picture,loaded,images/match_3.png
+5100,Picture,loaded,images/match_4.png
+5100,Picture,loaded,images/match_4.png
+5100,Picture,loaded,images/match_5.png
+5101,Picture,loaded,images/match_5.png
+5101,Picture,loaded,images/match_6.png
+5102,Picture,loaded,images/match_6.png
+5102,Picture,loaded,images/mismatch_1.png
+5103,Picture,loaded,images/mismatch_1.png
+5103,Picture,loaded,images/mismatch_2.png
+5104,Picture,loaded,images/mismatch_2.png
+5104,Picture,loaded,images/mismatch_3.png
+5104,Picture,loaded,images/mismatch_3.png
+5105,Picture,loaded,images/mismatch_4.png
+5105,Picture,loaded,images/mismatch_4.png
+5106,Picture,loaded,images/mismatch_5.png
+5106,Picture,loaded,images/mismatch_5.png
+5107,Picture,loaded,images/mismatch_6.png
+5107,Picture,loaded,images/mismatch_6.png
+5108,Picture,loaded,images/bottom_1.png
+5108,Picture,loaded,images/bottom_1.png
+5109,Picture,loaded,images/bottom_2.png
+5109,Picture,loaded,images/bottom_2.png
+5109,Picture,loaded,images/bottom_3.png
+5110,Picture,loaded,images/bottom_3.png
+5110,Picture,loaded,images/bottom_4.png
+5110,Picture,loaded,images/bottom_4.png
+5110,Picture,loaded,images/bottom_5.png
+5111,Picture,loaded,images/bottom_5.png
+5111,Picture,loaded,images/bottom_6.png
+5111,Picture,loaded,images/bottom_6.png
+5112,stderr,received,'Traceback (most recent call last):'
+5112,stderr,received,'  File "/Users/saru/Local_Work/cogsup/experimental_approach/project/tetris.py", line 187, in <module>'
+5112,stderr,received,'    run_trial()'
+5112,stderr,received,'  File "/Users/saru/Local_Work/cogsup/experimental_approach/project/tetris.py", line 165, in run_trial'
+5112,stderr,received,'    stim.present(clear=True,present=False)'
+5112,stderr,received,'    ^^^^^^^^^^^^'
+5112,stderr,received,"AttributeError: 'dict' object has no attribute 'present'"
